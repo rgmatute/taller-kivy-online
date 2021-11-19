@@ -6,6 +6,11 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
+from ws import client
+
+from ws.client import Client
+import json
+import random
 
 
 class TicTacToe(App):
@@ -17,6 +22,9 @@ class TicTacToe(App):
 
         self.configuration()
         self.contenedor()
+
+        # iniciamos el canal para comunicarnos , en linea
+        self.iniciarInstanciaWebSocket()
 
         return self.boxLayout
 
@@ -71,8 +79,16 @@ class TicTacToe(App):
         self.nex_turn(row, column, self.MySymbol)
 
     def emitTurn(self, button):
-        self.new_game()
+        #self.new_game()
 
+        nexTurn = random.choice(self.players)
+        
+        self.ws.send("match", body=json.dumps({
+            "message": {
+                "type": "nexTurn",
+                "nextTurn": nexTurn
+            }
+        }))
 
     def nex_turn(self, row, column, simbolo):
         if self.isMyTurn == False:
@@ -156,6 +172,18 @@ class TicTacToe(App):
 
     def ganador(self):
         pass
+
+
+    def  iniciarInstanciaWebSocket(self):
+        self.ws = Client("ws://stream.worlgamer.com:29852/websocket")
+        self.ws.connect()
+        self.ws.subscribe(self.username, callback=self.onMessage)
+        self.ws.subscribe("match", callback=self.onMessage)
+
+    def onMessage(self, message):
+        print(message.body)
+
+
 
 if __name__ == '__main__':
     app = TicTacToe().run()
