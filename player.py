@@ -1,4 +1,6 @@
 
+import json
+import random
 from kivy.app import App
 from kivy.core.window import Window
 
@@ -6,11 +8,8 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
-from ws import client
 
 from ws.client import Client
-import json
-import random
 
 
 class TicTacToe(App):
@@ -23,8 +22,13 @@ class TicTacToe(App):
         self.configuration()
         self.contenedor()
 
-        # iniciamos el canal para comunicarnos , en linea
-        self.iniciarInstanciaWebSocket()
+        # Iniciamos nuestro canal de comunicación con websocket
+        self.initWs()
+
+        self.ping()
+
+        # self.player = random.choice(self.players)
+        # self.emitTurn(self.player)
 
         return self.boxLayout
 
@@ -51,6 +55,7 @@ class TicTacToe(App):
         self.mibtn.bind(on_press= self.emitTurn)
 
         # Oponente
+        #self.boxLayoutOpponent = GridLayout(cols=2, row_force_default=True, row_default_height=50)
         self.boxLayoutOpponent = BoxLayout(orientation='horizontal', size_hint_y= None, height=30)
         self.lblPlayer = Label(text=self.username)
         self.lblOpponent = Label(text=self.opponent)
@@ -76,19 +81,83 @@ class TicTacToe(App):
         self.boxLayout.add_widget(self.gridLayout)
 
     def pre_nex_turn(self, button, row, column):
-        self.nex_turn(row, column, self.MySymbol)
+        if self.isMyTurn and self.buttons[row][column].text == "":
+            self.emit(self.opponent, row, column, self.MySymbol)
+            self.nex_turn(row, column, self.MySymbol)
+            self.isMyTurn = False
+
+    def initWs(self):
+        self.ws = Client("ws://stream.worlgamer.com:29852/websocket")
+        self.ws.connect()
+        self.ws.subscribe(self.username, callback=self.onMessage)
+        self.ws.subscribe("match", callback=self.onMessage)
+
+    def onMessage(self, message):
+        body = json.loads(message.body)
+        type = body["message"]["type"]
+        print("OnMessage: {}".format(body))
+        if type == 'ping':
+            if self.username == body["message"]["username"]:
+                print("soy yo")
+            else:
+                self.pong()
+                self.opponent = body["message"]["username"]
+                self.lblOpponent.text = self.opponent
+                self.existOpponent = True
+        elif type == 'pong':
+            if self.username != body["message"]["username"]:
+                self.opponent = body["message"]["username"]
+                self.lblOpponent.text = self.opponent
+                self.existOpponent = True
+        elif type == 'nexTurn':
+            print("mi simbolo: {} - Turno de: {}".format(self.MySymbol, body["message"]["nexTurn"]))
+            self.isMyTurn = False
+            self.new_game()
+            if body["message"]["nexTurn"] == self.MySymbol:
+                self.isMyTurn = True
+                self.lblTurnoDe.text= "Es el Turno de {}".format(self.username)
+            else:
+                self.lblTurnoDe.text= "Es el Turno de {}".format(self.opponent)
+        else:
+            row = body['message']['content']['row']
+            column = body['message']['content']['column']
+            symbol = body['message']['content']['symbol']
+            self.nex_turn(row, column, symbol)
+            self.check_winner()
+
+            self.lblTurnoDe.text= "Es el Turno de {}".format(self.username)
+                
+
+    def emit(self, to, row, column, symbol):
+        self.ws.send(to, body=json.dumps({
+            "message": {
+                "type": "game",
+                "content": {
+                    "username": self.username,
+                    "row": row,
+                    "column": column,
+                    "symbol": symbol
+                }
+            }
+        }))
 
     def emitTurn(self, button):
+        #if nexTurn == None:
+        #    print("No tiene turno")
+        nexTurn = random.choice(self.players)
+        #else:
+            #nexTurn = random.choice(self.players)
+        
+        #self.lblTurnoDe.text= "Es el Turno de {}".format(nexTurn)
         #self.new_game()
 
-        nexTurn = random.choice(self.players)
-        
         self.ws.send("match", body=json.dumps({
             "message": {
                 "type": "nexTurn",
-                "nextTurn": nexTurn
+                "nexTurn": nexTurn
             }
         }))
+
 
     def nex_turn(self, row, column, simbolo):
         if self.isMyTurn == False:
@@ -164,26 +233,31 @@ class TicTacToe(App):
     def new_game(self):
         print("Inicia nuevamente")
 
+        # self.player = random.choice(self.players)
         for row in range(3):
             for column in range(3):
                 if self.buttons[row][column].text != "":
                     self.buttons[row][column].text = ""
                     self.buttons[row][column].background_color=1,1,1,1
 
+    def ping(self):
+        self.ws.send("match", body=json.dumps({
+            "message": {
+                "type": "ping",
+                "username": self.username
+            }
+        }))
+
+    def pong(self):
+        self.ws.send('match', body=json.dumps({
+            "message": {
+                "type": "pong",
+                "username": self.username
+            }
+        }))
+
     def ganador(self):
         pass
-
-
-    def  iniciarInstanciaWebSocket(self):
-        self.ws = Client("ws://stream.worlgamer.com:29852/websocket")
-        self.ws.connect()
-        self.ws.subscribe(self.username, callback=self.onMessage)
-        self.ws.subscribe("match", callback=self.onMessage)
-
-    def onMessage(self, message):
-        print(message.body)
-
-
 
 if __name__ == '__main__':
     app = TicTacToe().run()
